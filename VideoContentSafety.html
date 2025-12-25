@@ -1,0 +1,210 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+<body>
+    <h1>Azure Video Indexer Example</h1>
+    <table>
+        <tr>
+            <td><button id="go">Upload & Index Video</button></td>
+            <td><button id="check">Check Video Status</button></td>
+        </tr>
+    </table>
+    <div id="output"></div>
+    <script>
+        // Configuration
+        const API_URL = 'https://api.videoindexer.ai';
+        //const ACCOUNT_ID = 'de81bdcb-8454-4d8a-9e16-e94ccf104eb4';  
+        const ACCOUNT_ID='869e3f65-33eb-43c6-858d-59aed0ccc07e';
+        const LOCATION = 'trial';                                   // 試用版地區
+        //const API_KEY = 'bee6a8e9ae9448eaad44a11f3f5cece7';         // 金鑰
+        const API_KEY = '5d63dc53b1f3448e9373743fe99d63aa';
+        
+        //處理go按鍵的Click事件
+        document.getElementById("go").addEventListener("click", async ()=>{
+            await uploadAndIndexVideo();
+        });
+        
+        //處理check按鍵的Click事件
+        document.getElementById("check").addEventListener("click", async ()=>{
+            const accessToken=await getAccessToken();
+            await debugVideoStatus(accessToken);
+        });
+
+        //取得存取權杖
+        async function getAccessToken(allowEdit = true) {
+            const params = new URLSearchParams({                //準備參數
+                allowEdit: allowEdit ? 'true' : 'false'
+            });
+            const response = await fetch(                       // 求取權杖
+                `${API_URL}/auth/${LOCATION}/Accounts/${ACCOUNT_ID}/AccessToken?${params}`,
+                {
+                    method: 'GET',
+                    headers: {
+                        'Ocp-Apim-Subscription-Key': API_KEY
+                    }
+                }
+            );
+            if (!response.ok) {                                 // 求取權杖失敗 
+                throw new Error(`Failed to get access token: ${response.statusText}`);
+            }
+            const data = await response.json();                 // 取得權杖
+            return data;                                        // 傳回權杖
+        }
+
+        // 測試欲分析的影片是否能夠正常讀取
+        async function testBlobUrl(fullBlobUrl) {
+            try {
+                const testResponse = await fetch(fullBlobUrl, { method: 'HEAD' });  // 測試影片是否能夠正常讀取但不下載
+                console.log('Blob Status:', testResponse.status);
+                console.log('Content-Type:', testResponse.headers.get('content-type')); 
+                if (testResponse.ok) {                                              // 影片能夠正常讀取
+                    console.log('Blob reachable! Size:', testResponse.headers.get('content-length'));
+                    return true;
+                } else {                                                            // 影片無法正常讀取
+                    const errorText = await testResponse.text();
+                    console.error('Blob unreachable:', testResponse.status, errorText);
+                    return false;
+                }
+            } catch (err) {
+                console.error('Fetch error (network/firewall?):', err.message);
+                return false;
+            }
+        }
+
+        //上傳影片至Azure Video Indexer, 並分析影片內容
+        async function uploadToVideoIndexer(videoUrl, videoName, accessToken) {
+            if (!(await testBlobUrl(videoUrl))) {                                   // 檢驗影片是否能夠被讀取
+                console.error('Blob not ready—fix first');
+                return;
+            }
+            const encoded = encodeURIComponent(videoUrl);                           // 編碼影片的網址
+            const videoIndexerUrl = `https://api.videoindexer.ai/trial/Accounts/${ACCOUNT_ID}/Videos` +
+                `?accessToken=${accessToken}&name=${videoName}&privacy=Private&videoUrl=${encoded}`;
+            try {
+                const response = await fetch(videoIndexerUrl, { method: 'POST', mode: 'cors' }); //執行上傳與分析
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => response.text());
+                    console.error('Upload Error:', response.status, errorData);
+                    if (errorData.includes('URL_UNREACHABLE')) {
+                        console.log('Double-check SAS expiry/firewall.');
+                    }
+                    return;
+                }
+                const result = await response.json();                               // 取得上傳結果   
+                console.log('Upload Success! Video Details:', result);
+                console.log('Video ID for status polling:', result.id);
+                return result.id;                                                   // 取得影片id
+            } catch (err) {
+                console.error('Network/Fetch Error:', err);
+            }
+        }
+
+        // 準備欲分析的影片, 並叫用uploadToVideoIndexer上傳影片至Azure Video Indexer進行分析
+        async function uploadAndIndexVideo() {
+            const output = document.getElementById('output');
+            output.innerHTML = '<p>Starting process...</p>';
+            try {
+                // Step 1: 取得存取權杖
+                const accessToken = await getAccessToken(true);  // allowEdit: true for upload
+                console.log('Access Token:', accessToken);
+                output.innerHTML += '<p>Access token obtained.</p>';
+
+                // Step 2: 上傳影片至Azure Video Indexer
+                //const videoUrl = "https://team0storage.blob.core.windows.net/videos/Godzilla.mp4?sp=r&st=2025-12-06T16:00:00Z&se=2025-12-14T06:38:10Z&spr=https&sv=2024-11-04&sr=b&sig=jc9jgbhp7awA1Y%2BJfS5s3Y1yI21P5XAX%2F3VBIXIPP2o%3D";  // Update if needed
+                //videoId=await uploadToVideoIndexer(videoUrl, "Godzilla", accessToken);
+                
+                const videoUrl = "https://www.msn.com/zh-tw/news/other/%E5%B0%81%E9%9D%A2%E6%95%85%E4%BA%8B-%E5%AF%A6%E8%B3%AA%E6%8E%8C%E6%8E%A7%E6%B0%91%E5%A0%B1-%E7%B1%8C%E9%8C%A2%E8%AD%89%E6%93%9A%E6%9B%9D%E5%85%89-%E9%BB%83%E5%9C%8B%E6%98%8C%E8%A6%81%E9%87%91%E4%B8%BB%E5%8C%AF%E5%87%B1%E6%80%9D%E5%8D%83%E8%90%AC%E5%85%83/ar-AA1SK9g0?ocid=hpmsn&cvid=6947d66d1a9a4932951a9e36d70dcf0d&ei=17";  // Update if needed
+                videoId=await uploadToVideoIndexer(videoUrl, "Bird", accessToken);
+
+                output.innerHTML += `<p>Video uploaded. ID: ${videoId}. Indexing started (may take minutes).</p>`;
+            } catch (error) {
+                console.error('Error:', error);
+                output.innerHTML += `<p>Error: ${error.message}</p>`;
+            }
+        }
+
+        // 查詢所有上傳至Azure Video Indexer的影片
+        async function listVideos(accessToken) {
+            const listUrl = `https://api.videoindexer.ai/trial/Accounts/${ACCOUNT_ID}/Videos?accessToken=${accessToken}`;
+            const response = await fetch(listUrl, { method: 'GET', mode: 'cors' });
+            if (!response.ok) {                         // 如果查詢發生錯誤
+                const errorText = await response.text();
+                console.error('List error:', response.status, errorText);
+                return [];
+            }    
+            const data = await response.json();         // 取得查詢結果
+            const videos=data["results"];               // 讀取results屬性的內容值
+            console.log('Your videos:');
+            videos.forEach(v => {                       // 列示影片的編號, 名稱, 狀態, 和影片長度
+                console.log(`- ID: ${v.id}, Name: "${v.name}", State: ${v.state}, Duration: ${v.durationInSeconds}s`);
+            });
+            return videos;                              // 傳回所有的影片資料
+        }
+        
+        // 判斷影片是否分析完成, 並顯示分析完成的影片的分析結果(見解)
+        async function debugVideoStatus(accessToken) {
+            try {
+                const videos = await listVideos(accessToken);       // 取得己上傳至Azure Video Indexer的所有影片
+                if (videos.length === 0) {                          // 如果查無影片
+                    console.log('No videos found');
+                    return;
+                }
+                else {
+                    videos.forEach(async (video, index)=>{          // 查詢影片的編號與狀態
+                        console.log(`Found video: ID "${video.id}", State: ${video.state}`);;
+                        if (video.state=="Processed") {             // 如果狀態為Processed(即己分析完成), 則顯示分析結果
+                            const insightsUrl = `${API_URL}/${LOCATION}/Accounts/${ACCOUNT_ID}/Videos/${video.id}/Index?accessToken=${accessToken}`;
+                            const insightsRes = await fetch(insightsUrl, { method: 'GET' });
+                            const insights = await insightsRes.json();
+                            var topics=insights['summarizedInsights']['topics'];
+                            topics.forEach((value, index)=>{
+                                //console.log(value.name);
+                                moderateText(value.name, index);
+                            });
+                        }
+                    });
+                }
+            } catch (err) {
+                console.error('error:', err.message);
+            }
+        }
+        
+        var endpoint = "Azure Content Safety服務端點";
+        var key = "Azure Content Safety服務金鑰";
+        async function moderateText(value, index){
+            var body = {
+                "text": value,
+                "categories": [
+                    "Hate", "Sexual", "SelfHarm", "Violence"
+                ],
+                outputType: "FourSeverityLevels"
+            };
+            try{
+                var response=await fetch(`${endpoint}/contentsafety/text:analyze?api-version=2024-02-15-preview`, {
+                    method:"POST",
+                    body: JSON.stringify(body),
+                    headers:{
+                        "Content-Type": "application/json",
+                        "Ocp-Apim-Subscription-Key": key
+                    }
+                });
+                if (response.ok){
+                    var data=await response.json();
+                    //alert(JSON.stringify(data)); 
+                    var hateSeverity = data["categoriesAnalysis"][0]["severity"];
+                    var sexualSeverity = data["categoriesAnalysis"][1]["severity"];
+                    var selfHarmSeverity = data["categoriesAnalysis"][2]["severity"];
+                    var violenceSeverity = data["categoriesAnalysis"][3]["severity"];
+                    console.log(`Topic ${index}:仇恨:${hateSeverity}, 成人:${sexualSeverity}, 自殘:${selfHarmSeverity}, 暴力:${violenceSeverity}`);
+                }
+            }
+            catch(err){
+                alert(err.message);
+            }
+        }
+    </script> 
+</body>
+</html>
